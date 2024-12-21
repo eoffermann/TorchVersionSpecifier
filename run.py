@@ -2,6 +2,7 @@ import argparse
 import requests
 import re
 from typing import List, Dict
+import gradio as gr
 
 def get_torchvision_matrix(url: str = "https://raw.githubusercontent.com/pytorch/vision/refs/heads/main/README.md") -> Dict[str, str]:
     """
@@ -152,13 +153,16 @@ def interactive_mode():
 def main():
     parser = argparse.ArgumentParser(description="PyTorch Version Selector")
     parser.add_argument("-i", "--interactive", action="store_true", help="Launch interactive mode")
+    parser.add_argument("-g", "--gradio", action="store_true", help="Launch Gradio interface")
     parser.add_argument("-p", "--python", type=str, help="Specify Python version (e.g., 3.10)")
     parser.add_argument("-c", "--cuda", type=str, help="Specify CUDA version (e.g., 121 for CUDA 12.1)")
     parser.add_argument("-b", "--build", type=str, help="Specify build variant (e.g., cpu, cu121)")
 
     args = parser.parse_args()
 
-    if args.interactive:
+    if args.gradio:
+        launch_gradio_interface()
+    elif args.interactive:
         interactive_mode()
     elif args.python:
         try:
@@ -173,20 +177,16 @@ def main():
                 print(f"Compatible versions for Python {args.python}, CUDA {args.cuda or 'any'}, and variant {args.build or 'any'}:\n")
                 for file in deduplicated_files:
                     if file["package"] == "torch":
-                        #print(f"  - torch version: {file['version']} (build: {file['build_variant']})")
                         print(f"\ntorch=={file['version']}+{file['build_variant']}")
-                        #print(f"     - torchaudio version: {file['version']} (build: {file['build_variant']})")
                         print(f"     torchaudio=={file['version']}+{file['build_variant']}")
 
                         # Match TorchVision versions (using the compatibility matrix)
                         torch_major = '.'.join(file['version'].split('.')[:2])  # Extract major and minor version of Torch
                         torch_minor = file['version'].split('.')[-1]  # Extract the minor release of Torch
-                        
+
                         if torch_major in torchvision_matrix:
                             torchvision_major = torchvision_matrix[torch_major]
-                            # Construct the TorchVision version using TorchVision's major version and Torch's minor release
                             torchvision_version = f"{torchvision_major}.{torch_minor}"
-                            #print(f"        - torchvision version: {torchvision_version} (build: {file['build_variant']})")
                             print(f"     torchvision=={torchvision_version}+{file['build_variant']}")
                         else:
                             print("     - No matching torchvision version found.")
@@ -197,7 +197,55 @@ def main():
     else:
         parser.print_help()
 
+def launch_gradio_interface():
+    """
+    Launches a Gradio interface for the utility.
+    """
+    def gradio_interface(python_version, cuda_version, build_variant):
+        try:
+            compatible_files = find_compatible_whl_files(python_version, cuda_version, build_variant)
+            deduplicated_files = deduplicate_files(compatible_files)
 
+            if not deduplicated_files:
+                return f"No compatible wheel files found for Python {python_version}, CUDA {cuda_version or 'any'}, and variant {build_variant or 'any'}."
+
+            results = []
+            for file in deduplicated_files:
+                if file["package"] == "torch":
+                    result = [f"torch=={file['version']}+{file['build_variant']}"]
+                    result.append(f"torchaudio=={file['version']}+{file['build_variant']}")
+
+                    # Fetch compatibility matrix for TorchVision
+                    torchvision_matrix = get_torchvision_matrix()
+                    torch_major = '.'.join(file['version'].split('.')[:2])  # Extract major and minor version of Torch
+                    torch_minor = file['version'].split('.')[-1]  # Extract the minor release of Torch
+
+                    if torch_major in torchvision_matrix:
+                        torchvision_major = torchvision_matrix[torch_major]
+                        torchvision_version = f"{torchvision_major}.{torch_minor}"
+                        result.append(f"torchvision=={torchvision_version}+{file['build_variant']}")
+                    else:
+                        result.append("No matching torchvision version found.")
+
+                    results.append("\n".join(result))
+            return "\n\n".join(results)
+        except Exception as e:
+            return f"An error occurred: {e}"
+
+    # Define Gradio interface
+    interface = gr.Interface(
+        fn=gradio_interface,
+        inputs=[
+            gr.Textbox(label="Python Version (e.g., 3.10)", placeholder="3.10"),
+            gr.Textbox(label="CUDA Version (e.g., 121 for CUDA 12.1)", placeholder="121"),
+            gr.Textbox(label="Build Variant (e.g., cpu, cu121)", placeholder="cpu"),
+        ],
+        outputs=gr.Textbox(label="Compatible Wheel Files"),
+        title="PyTorch Version Selector",
+        description="Enter the Python version, CUDA version, and build variant to find compatible PyTorch wheel files.",
+    )
+
+    interface.launch(share=True)  # Launch the Gradio interface and open it in the browser
 
 if __name__ == "__main__":
     main()
